@@ -1,31 +1,22 @@
-local list = require "list"
+local list = require "lnodelist"
 
 local l = list.new()
-local l1 = list.new()
-
--- l
-
-for i = 1, 8, 1 do
-  list.push(l, i)
+local startl = os.clock()
+for i = 1, 100000, 1 do
+  list.push(l, tostring(i))
 end
+print(os.clock() - startl)
 
-list.reverse(l);
--- list.reverse(l);
-
-list.remove(l, 3)
-
-list.remove(l, 1)
-
-list.pop(l)
-list.popleft(l)
-for i = 1, 8, 1 do
-  print(list.get(l, i))
+local t = {}
+local startt = os.clock()
+for i = 1, 100000, 1 do
+  table.insert(t, tostring(i))
 end
+print(os.clock() - startt)
 
--- for i = 10, 2, -1 do
---   list.pop(l)
---   print(tostring(list.size(l)) .. " -- " .. tostring(list.get(l, i - 1)))
--- end
+
+
+
 
 
 
