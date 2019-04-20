@@ -31,15 +31,6 @@ struct l_list *check_list(lua_State *L, int arg) {
   return l;
 }
 
-/* check validity of data type on specific idx */
-int check_type(lua_State *L, int arg) {
-  int type = lua_type(L, arg);
-  if (type == LUA_TNONE) {
-    luaL_error(L, "invalid data type!");
-  }
-  return type;
-}
-
 /* check validity of nodes */
 void check_empty(lua_State *L, l_list *l) {
   if (l->size <= 0) {
@@ -57,33 +48,40 @@ lua_Integer check_idx(lua_State *L, l_list *l, int arg) {
 }
 
 /* assign value to value pointer, may modify type */
-void assign_val(lua_State *L, int arg, void **value, int *type) {
-  switch (*type) {
+void assign_val(lua_State *L, l_node* node, int arg) {
+  int type = lua_type(L, arg);
+  switch (type) {
     case LUA_TNUMBER:
       if (lua_isinteger(L, arg)) {
-        *value = malloc(sizeof(lua_Integer));
-        *(lua_Integer *)*value = lua_tointeger(L, arg);
-        *type = LUA_TINTEGER;
+        node->value = malloc(sizeof(lua_Integer));
+        *(lua_Integer *)node->value = lua_tointeger(L, arg);
+        node->type = LUA_TINTEGER;
       } else {
-        *value = malloc(sizeof(lua_Number));
-        *(lua_Number *)*value = lua_tonumber(L, arg);
+        node->value = malloc(sizeof(lua_Number));
+        *(lua_Number *)node->value = lua_tonumber(L, arg);
+        node->type = LUA_TNUMBER;
       }
       break;
     case LUA_TSTRING:  // TODO: ...
-      *value = malloc(sizeof(char) * lua_rawlen(L, arg));
-      *(const char **)*value = lua_tostring(L, arg);
+      node->value = malloc(sizeof(char) * lua_rawlen(L, arg));
+      *(const char **)node->value = lua_tostring(L, arg);
+      node->type = LUA_TSTRING;
       break;
     case LUA_TBOOLEAN:
-      *value = malloc(sizeof(int));
-      *(int *)*value = lua_toboolean(L, arg);
+      node->value = malloc(sizeof(int));
+      *(int *)node->value = lua_toboolean(L, arg);
+      node->type = LUA_TBOOLEAN;
       break;
     case LUA_TNIL:
-      *value = NULL;
+    case LUA_TNONE:
+      node->value = NULL;
+      node->type = type;
       break;
     default:  // store in registry index
       lua_pushvalue(L, arg);
-      *value = malloc(sizeof(int));
-      *(int *)*value = luaL_ref(L, LUA_REGISTRYINDEX);
+      node->value = malloc(sizeof(int));
+      *(int *)node->value = luaL_ref(L, LUA_REGISTRYINDEX);
+      node->type = type;
       break;
   }
 }
@@ -162,7 +160,7 @@ void push_raw_node(l_list *l) {
   }
   l->tail->next = NULL;
   l->tail->value = NULL;
-  l->size++;
+  ++l->size;
 }
 
 /* push a node to head without value and type */
@@ -180,7 +178,7 @@ void pushleft_raw_node(l_list *l) {
   }
   l->head->prev = NULL;
   l->head->value = NULL;
-  l->size++;
+  ++l->size;
 }
 
 /* remove head */
@@ -196,7 +194,7 @@ void remove_head(lua_State *L, l_list *l) {
   head->next = NULL;
   free(head);
   head = NULL;
-  l->size--;
+  --l->size;
 }
 
 /* remove tail */
@@ -212,7 +210,7 @@ void remove_tail(lua_State *L, l_list *l) {
   tail->prev = NULL;
   free(tail);
   tail = NULL;
-  l->size--;
+  --l->size;
 }
 
 /* remove a node at sprcific index */
@@ -230,12 +228,12 @@ void remove_node(lua_State *L, l_list *l, lua_Integer idx) {
     free_val(L, node);
     free(node);
     node = NULL;
-    l->size--;
+    --l->size;
   }
 }
 
 /* init a list */
-static int list_new(lua_State *L) {
+static int list_new(lua_State *L) {  // local l = list.new()
   l_list *l = (l_list *)lua_newuserdata(L, sizeof(l_list));
   l->size = 0;
   l->head = NULL;
@@ -246,37 +244,31 @@ static int list_new(lua_State *L) {
 }
 
 /* get size of the list */
-static int list_size(lua_State *L) {
+static int list_size(lua_State *L) {  // list.size(l)
   l_list *l = check_list(L, 1);
-  lua_Integer size = (lua_Integer)(l->size);
   lua_settop(L, 0);
-  lua_pushinteger(L, size);
+  lua_pushinteger(L, l->size);
   return 1;
 }
 
-/* push an node */
-static int list_push(lua_State *L) {
+/* push a node */
+static int list_push(lua_State *L) {  // list.push(l, val)
   l_list *l = check_list(L, 1);
-  int type = check_type(L, 2);
-  // lazy-pushing node
   push_raw_node(l);
-  assign_val(L, 2, &l->tail->value, &type);
-  l->tail->type = type;
+  assign_val(L, l->tail, 2);
   return 1;
 }
 
-/* push an node to left */
-static int list_pushleft(lua_State *L) {
+/* push a node to left */
+static int list_pushleft(lua_State *L) {  // list.pushleft(l, val)
   l_list *l = check_list(L, 1);
-  int type = check_type(L, 2);
   pushleft_raw_node(l);
-  assign_val(L, 2, &l->head->value, &type);
-  l->head->type = type;
+  assign_val(L, l->head, 2);
   return 1;
 }
 
-/* pop an node */
-static int list_pop(lua_State *L) {
+/* pop a node */
+static int list_pop(lua_State *L) {  // list.pop(l) -> last val
   l_list *l = check_list(L, 1);
   check_empty(L, l);
   push_val(L, l->tail);
@@ -284,8 +276,8 @@ static int list_pop(lua_State *L) {
   return 1;
 }
 
-/* pop an node at head */
-static int list_popleft(lua_State *L) {
+/* pop a node at head */
+static int list_popleft(lua_State *L) {  // list.popleft(l) -> first val
   l_list *l = check_list(L, 1);
   check_empty(L, l);
   push_val(L, l->head);
@@ -293,19 +285,34 @@ static int list_popleft(lua_State *L) {
   return 1;
 }
 
+/* remove a node from tail */
+static int list_remove(lua_State *L) {  // list.remove(l)
+  l_list *l = check_list(L, 1);
+  check_empty(L, l);
+  remove_tail(L, l);
+  return 1;
+}
+
+/* remove a node from tail */
+static int list_removeleft(lua_State *L) {  // list.removeleft(l)
+  l_list *l = check_list(L, 1);
+  check_empty(L, l);
+  remove_head(L, l);
+  return 1;
+}
+
 /* set a list value */
-static int list_set(lua_State *L) {
+static int list_set(lua_State *L) {  // list.set(l, idx, val)
   l_list *l = check_list(L, 1);
   lua_Integer idx = check_idx(L, l, 2);
-  int type = check_type(L, 3);
   l_node *node = get_node(l, idx);
-  free(node->value);
-  assign_val(L, 3, &node->value, &type);
+  free_val(L, node);
+  assign_val(L, node, 3);
   return 1;
 }
 
 /* get node of list by index */
-static int list_get(lua_State *L) {
+static int list_get(lua_State *L) {  // list.get(l, idx) -> l[idx]
   l_list *l = check_list(L, 1);
   lua_Integer idx = check_idx(L, l, 2);
   // get the correct nodesor
@@ -313,8 +320,39 @@ static int list_get(lua_State *L) {
   return 1;
 }
 
-/* remove an node */
-static int list_remove(lua_State *L) {
+/* insert a node to specific index */
+static int list_insert(lua_State *L) {  // list.insert(l, idx, val)
+  l_list *l = check_list(L, 1);
+  lua_Integer idx = luaL_checkinteger(L, 2);
+  if (idx <= 0 || idx > l->size + 1) {  // insert can be at l->size + 1!
+    luaL_error(L, "list size: %d --- index %d out of range!", l->size, idx);
+  }
+  l_node *node;
+  if (idx == 1) {
+    pushleft_raw_node(l);
+    node = l->head;
+  } else if (idx == l->size + 1) {
+    push_raw_node(l);
+    node = l->tail;
+  } else {
+    l_node *prev = get_node(l, idx - 1);
+    l_node *next = prev->next;
+    node = malloc(sizeof(l_node));
+    prev->next = node;
+    node->prev = prev;
+    next->prev = node;
+    node->next = next;
+    prev = NULL;
+    next = NULL;
+    ++l->size;
+  }
+  assign_val(L, node, 3);
+  node = NULL;
+  return 1;
+}
+
+/* delete a specific node */
+static int list_delete(lua_State *L) {  // list.delete(l, idx)
   l_list *l = check_list(L, 1);
   lua_Integer idx = check_idx(L, l, 2);
   remove_node(L, l, idx);
@@ -322,7 +360,7 @@ static int list_remove(lua_State *L) {
 }
 
 /* reverse list */
-static int list_reverse(lua_State *L) {
+static int list_reverse(lua_State *L) {  // list.reverse(l)
   l_list *l = check_list(L, 1);
   if (l->size <= 1) {
     return 0;  // no need to reverse
@@ -340,7 +378,8 @@ static int list_reverse(lua_State *L) {
   return 1;
 }
 
-static int list_clear(lua_State *L) {
+/* clear the whole list */
+static int list_clear(lua_State *L) {  // list.clear(l)
   l_list *l = check_list(L, 1);
   while (l->size > 0) {
     remove_tail(L, l);
@@ -348,30 +387,128 @@ static int list_clear(lua_State *L) {
   return 1;
 }
 
-// static int list_pairs(lua_State *L) {
+/* extend list l1 by another list l2 */
+static int list_extend(lua_State *L) {  // list.extend(l1, l2)
+  l_list *l1 = check_list(L, 1);
+  l_list *l2 = check_list(L, 2);
+  l_node *node = l2->head;
+  while (node != NULL) {
+    push_raw_node(l1);
+    push_val(L, node);
+    assign_val(L, l1->tail, 3);
+    node = node->next;
+    lua_pop(L, 1);
+  }
+  return 1;
+}
 
-// }
+/* foreach loop for stateful iteration */
+static int list_foreach(lua_State *L) {  // list.foreach(l, (val, idx) => {})
+  l_list *l = check_list(L, 1);
+  luaL_checktype(L, 2, LUA_TFUNCTION);
+  l_node *node = l->head;
+  lua_Integer idx = 0;
+  while (node != NULL) {
+    lua_pushvalue(L, 2);
+    push_val(L, node);
+    lua_pushinteger(L, ++idx);
+    lua_call(L, 2, 0);
+    node = node->next;
+  }
+  return 1;
+}
 
-static const luaL_Reg list_f[] = {
+/* map the original list */
+static int list_map(lua_State *L) {  // list.map(l, (val, idx) => newVal)
+  l_list *l = check_list(L, 1);
+  luaL_checktype(L, 2, LUA_TFUNCTION);
+  l_node *node = l->head;
+  lua_Integer idx = 0;
+  while (node != NULL) {
+    lua_pushvalue(L, 2);
+    push_val(L, node);
+    lua_pushinteger(L, ++idx);
+    lua_call(L, 2, 1);
+    free_val(L, node);
+    assign_val(L, node, 3);
+    lua_pop(L, 1);
+    node = node->next;
+  }
+  return 1;
+}
+
+/* some: find if the list has value fitting the condition */
+static int list_some(lua_State *L) {  // list.some(l, (val, idx) => boolean)
+  l_list *l = check_list(L, 1);
+  luaL_checktype(L, 2, LUA_TFUNCTION);
+  l_node *node = l->head;
+  lua_Integer idx = 0;
+  while (node != NULL) {
+    lua_pushvalue(L, 2);
+    push_val(L, node);
+    lua_pushinteger(L, ++idx);
+    lua_call(L, 2, 1);
+    if (lua_toboolean(L, 3)) {
+      lua_pushboolean(L, 1);
+      return 1;
+    }
+    lua_pop(L, 1);
+    node = node->next;
+  }
+  lua_pushboolean(L, 0);
+  return 0;
+}
+
+/* find: find the first element that fits the condition */
+static int list_find(lua_State *L) {
+  l_list *l = check_list(L, 1);
+  luaL_checktype(L, 2, LUA_TFUNCTION);
+  l_node *node = l->head;
+  lua_Integer idx = 0;
+  while (node != NULL) {
+    lua_pushvalue(L, 2);
+    push_val(L, node);
+    lua_pushinteger(L, ++idx);
+    lua_call(L, 2, 1);
+    if (lua_toboolean(L, 3)) {
+      push_val(L, node);
+      return 1;
+    }
+    lua_pop(L, 1);
+    node = node->next;
+  }
+  lua_pushnil(L);
+  return 0;
+}
+
+static const luaL_Reg lnodelist_f[] = {
     {"new", list_new},
     {"size", list_size},
     {"push", list_push},
     {"pushleft", list_pushleft},
     {"pop", list_pop},
     {"popleft", list_popleft},
+    {"remove", list_remove},
+    {"removeleft", list_removeleft},
     {"set", list_set},
     {"get", list_get},
-    {"remove", list_remove},
+    {"insert", list_insert},
+    {"delete", list_delete},
     {"reverse", list_reverse},
     {"clear", list_clear},
     // {"concat", list_concat},
-    // {"extend", list_extend},
-    // {"__pairs", list_pairs},
+    {"extend", list_extend},
+    {"foreach", list_foreach},
+    {"map", list_map},
+    {"some", list_some},
+    {"find", list_find},
+    {"__len", list_size},
+    {"__gc", list_clear},
     {NULL, NULL},
 };
 
-LUAMOD_API int luaopen_nodelist(lua_State *L) {
+LUAMOD_API int luaopen_lnodelist(lua_State *L) {
   lua_newtable(L);
-  luaL_setfuncs(L, list_f, 0);
+  luaL_setfuncs(L, lnodelist_f, 0);
   return 1;
 }
