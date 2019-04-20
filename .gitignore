@@ -2,5 +2,4 @@
 .editorconfig
 *.sh
 core*
-src/
 *.so
