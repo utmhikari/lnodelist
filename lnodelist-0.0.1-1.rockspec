@@ -7,6 +7,7 @@ description = {
    summary = "A doubly linked list with pseudo JS sugars and common features written in C API",
    detailed = [[
 see https://github.com/utmhikari/lnodelist for details~
+need more issues XD~~~
    ]],
    license = "MIT"
 }
